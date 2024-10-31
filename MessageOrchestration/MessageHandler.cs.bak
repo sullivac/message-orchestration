@@ -1,0 +1,41 @@
+namespace MessageOrchestration;
+
+public class MessageHandler<
+    TMessage,
+    TMessageMetadata,
+    TUnverified,
+    TVerified>(
+    IMessageQuery<TMessage, TMessageContainer, TUnverified> _messageQuery,
+    IAuthorizer<TMessage, TMessageMetadata, TUnverified> _authorizer,
+    IValidator<TMessage, TMessageMetadata, TUnverified> _validator,
+    IMapper<TMessage, TMessageMetadata, TUnverified, TUnverified> _mapper,
+    IProcessor<TMessage, TMessageMetadata, TVerified> _processor,
+    IEventPublisher _eventPublisher)
+{
+    public async Task HandleAsync(
+        MessageContainer<TMessage, TMessageMetadata> messageContainer)
+    {
+        try
+        {
+            TUnverified unverified = await _messageQuery.GetDataAsync(messageContainer);
+
+            bool authorized = await _authorizer.AuthorizeAsync(messageContainer, unverified);
+
+            if (authorized)
+            {
+                bool valid = await _validator.ValidateAsync(messageContainer, unverified);
+
+                if (valid)
+                {
+                    TVerified verified = _mapper.Map(messageContainer, unverified);
+
+                    await _processor.ProcessAsync(messageContainer, verified);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            await PublishUnhandledExceptionEvent(ex, messageContainer);
+        }
+    }
+}
